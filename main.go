@@ -12,7 +12,6 @@ import (
 	"regexp"
 	"strconv"
 
-	"github.com/davecgh/go-spew/spew"
 	"github.com/hekmon/transmissionrpc"
 	"github.com/mmcdole/gofeed"
 	bolt "go.etcd.io/bbolt"
@@ -78,10 +77,14 @@ func btClient(connection string) (*transmissionrpc.Client, error) {
 }
 
 func main() {
+	if len(os.Args) < 2 {
+		fmt.Print("anime-download <config path>\n")
+		return
+	}
 	db, err := bolt.Open("./db", 0664, nil)
 	check(err)
 
-	b, err := ioutil.ReadFile("./config.yml")
+	b, err := ioutil.ReadFile(os.Args[1])
 	check(err)
 
 	cfg := &Config{}
@@ -179,7 +182,6 @@ func move(db *bolt.DB, client *transmissionrpc.Client, cfg *Config) error {
 			if err != nil {
 				return err
 			}
-			spew.Dump(d)
 
 			if d.Compleated == true {
 				return nil
