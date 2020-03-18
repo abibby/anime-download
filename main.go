@@ -3,20 +3,26 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
+	"io/ioutil"
 	"log"
 	"net/url"
+	"os"
+	"path"
 	"regexp"
 	"strconv"
 
+	"github.com/davecgh/go-spew/spew"
 	"github.com/hekmon/transmissionrpc"
 	"github.com/mmcdole/gofeed"
 	bolt "go.etcd.io/bbolt"
+	"gopkg.in/yaml.v2"
 )
 
 type Download struct {
 	ID               []byte
 	TorrentURL       string
-	Downloading      bool
+	Compleated       bool
 	Series           string
 	TransmissionHash string
 }
@@ -28,8 +34,11 @@ type Series struct {
 }
 
 type Config struct {
-	Connection string    `yaml:"connection"`
-	Series     []*Series `yaml:"series"`
+	Connection   string    `yaml:"connection"`
+	Ratio        int       `yaml:"ratio"`
+	Series       []*Series `yaml:"series"`
+	DownloadPath string    `yaml:"download_path"`
+	CompletePath string    `yaml:"complete_path"`
 }
 
 var bucket = []byte("MyBucket")
@@ -72,20 +81,11 @@ func main() {
 	db, err := bolt.Open("./db", 0664, nil)
 	check(err)
 
-	cfg := &Config{
-		Connection: "https://adam:test@tr.adambibby.ca",
-		Series: []*Series{
-			{
-				Title: "Bofuri",
-				RSS:   "https://nyaa.si/?page=rss&q=%5BJudas%5D+Itai+No+Wa+Iya+Nano+De+Bougyoryoku+Ni+Kyokufuri+Shitai+To+Omoimasu+%28Bofuri%29+1080&c=0_0&f=0",
-			},
-			{
-				Title:  "Somali to Mori no Kamisama",
-				RSS:    "http://www.horriblesubs.info/rss.php?res=1080",
-				RegExp: "Somali to Mori no Kamisama",
-			},
-		},
-	}
+	b, err := ioutil.ReadFile("./config.yml")
+	check(err)
+
+	cfg := &Config{}
+	check(yaml.Unmarshal(b, cfg))
 
 	client, err := btClient(cfg.Connection)
 	check(err)
@@ -93,6 +93,9 @@ func main() {
 	for _, series := range cfg.Series {
 		check(download(db, client, series))
 	}
+
+	check(move(db, client, cfg))
+
 }
 
 func initBucket(db *bolt.DB, name []byte) error {
@@ -143,8 +146,9 @@ func download(db *bolt.DB, transmissionbt *transmissionrpc.Client, s *Series) er
 
 				d := &Download{
 					ID:               id,
+					Series:           s.Title,
 					TorrentURL:       item.Link,
-					Downloading:      true,
+					Compleated:       false,
 					TransmissionHash: *torrent.HashString,
 				}
 				by, err := json.Marshal(d)
@@ -164,4 +168,84 @@ func download(db *bolt.DB, transmissionbt *transmissionrpc.Client, s *Series) er
 	}
 
 	return nil
+}
+
+func move(db *bolt.DB, client *transmissionrpc.Client, cfg *Config) error {
+	return db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucket)
+		return b.ForEach(func(k, v []byte) error {
+			d := &Download{}
+			err := json.Unmarshal(v, d)
+			if err != nil {
+				return err
+			}
+			spew.Dump(d)
+
+			if d.Compleated == true {
+				return nil
+			}
+
+			torrents, err := client.TorrentGetAllForHashes([]string{d.TransmissionHash})
+			if err != nil {
+				return err
+			}
+			if len(torrents) == 0 {
+				return nil
+			}
+			torrent := torrents[0]
+
+			if torrent.DoneDate != nil && !torrent.DoneDate.IsZero() {
+
+				log.Printf("Finished downloading %s", *torrent.Name)
+
+				for _, file := range torrent.Files {
+					dst := path.Join(cfg.CompletePath, d.Series, file.Name)
+					err := os.MkdirAll(path.Dir(dst), 0755)
+					if err != nil {
+						return err
+					}
+					err = copyFile(path.Join(cfg.DownloadPath, file.Name), dst)
+					if err != nil {
+						return err
+					}
+				}
+
+				d.Compleated = true
+				by, err := json.Marshal(d)
+				if err != nil {
+					return err
+				}
+				err = b.Put(k, by)
+				if err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+	})
+}
+
+func copyFile(src, dst string) error {
+	sourceFileStat, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+
+	if !sourceFileStat.Mode().IsRegular() {
+		return fmt.Errorf("%s is not a regular file", src)
+	}
+
+	source, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer source.Close()
+
+	destination, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer destination.Close()
+	_, err = io.Copy(destination, source)
+	return err
 }
