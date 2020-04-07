@@ -142,8 +142,14 @@ func download(db *bolt.DB, transmissionbt *transmissionrpc.Client, s *Series) er
 			if g == nil {
 				log.Printf("Downloading %s", item.Title)
 
+				file := ""
+				if len(item.Enclosures) > 0 {
+					file = item.Enclosures[0].URL
+				} else if item.Link != "" {
+					file = item.Link
+				}
 				torrent, err := transmissionbt.TorrentAdd(&transmissionrpc.TorrentAddPayload{
-					Filename: &item.Link,
+					Filename: &file,
 				})
 				check(err)
 
