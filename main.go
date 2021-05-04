@@ -6,13 +6,15 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	"net/http"
 	"net/url"
 	"os"
 	"path"
+	"path/filepath"
 	"regexp"
 	"strconv"
 
-	"github.com/hekmon/transmissionrpc"
+	"github.com/abibby/transmissionrpc"
 	"github.com/mmcdole/gofeed"
 	bolt "go.etcd.io/bbolt"
 	"gopkg.in/yaml.v2"
@@ -50,7 +52,9 @@ func check(err error) {
 
 func btClient(connection string) (*transmissionrpc.Client, error) {
 	u, err := url.Parse(connection)
-	check(err)
+	if err != nil {
+		return nil, err
+	}
 
 	pass, _ := u.User.Password()
 	advancedConfig := &transmissionrpc.AdvancedConfig{}
@@ -94,7 +98,10 @@ func main() {
 	check(err)
 
 	for _, series := range cfg.Series {
-		check(download(db, client, series))
+		err = download(db, client, series)
+		if err != nil {
+			log.Print(err)
+		}
 	}
 
 	check(move(db, client, cfg))
@@ -148,10 +155,24 @@ func download(db *bolt.DB, transmissionbt *transmissionrpc.Client, s *Series) er
 				} else if item.Link != "" {
 					file = item.Link
 				}
-				torrent, err := transmissionbt.TorrentAdd(&transmissionrpc.TorrentAddPayload{
-					Filename: &file,
-				})
-				check(err)
+
+				path := "/tmp/" + file
+				err := os.MkdirAll(filepath.Dir(path), 0755)
+				if err != nil {
+					return err
+				}
+				err = downloadFile(path, file)
+				if err != nil {
+					return err
+				}
+
+				torrent, err := transmissionbt.TorrentAddFile(path)
+				// torrent, err := transmissionbt.TorrentAdd(&transmissionrpc.TorrentAddPayload{
+				// 	Filename: &path,
+				// })
+				if err != nil {
+					return err
+				}
 
 				d := &Download{
 					ID:               id,
@@ -172,7 +193,7 @@ func download(db *bolt.DB, transmissionbt *transmissionrpc.Client, s *Series) er
 			return nil
 		})
 		if err != nil {
-			return err
+			log.Print(err)
 		}
 	}
 
@@ -255,5 +276,28 @@ func copyFile(src, dst string) error {
 	}
 	defer destination.Close()
 	_, err = io.Copy(destination, source)
+	return err
+}
+
+// DownloadFile will download a url to a local file. It's efficient because it will
+// write as it downloads and not load the whole file into memory.
+func downloadFile(filepath string, url string) error {
+
+	// Get the data
+	resp, err := http.Get(url)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	// Create the file
+	out, err := os.Create(filepath)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	// Write the body to file
+	_, err = io.Copy(out, resp.Body)
 	return err
 }
