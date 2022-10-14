@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -9,29 +8,20 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path"
-	"path/filepath"
-	"regexp"
 	"strconv"
 
+	. "github.com/abibby/anime-download/try"
 	"github.com/abibby/transmissionrpc"
-	"github.com/mmcdole/gofeed"
+	"go.etcd.io/bbolt"
 	bolt "go.etcd.io/bbolt"
 	"gopkg.in/yaml.v2"
 )
 
-type Download struct {
-	ID               []byte
-	TorrentURL       string
-	Compleated       bool
-	Series           string
-	TransmissionHash string
-}
-
 type Series struct {
-	Title  string `yaml:"title"`
-	RSS    string `yaml:"rss"`
-	RegExp string `yaml:"regexp"`
+	Title         string `yaml:"title"`
+	RSS           string `yaml:"rss"`
+	RegExp        string `yaml:"regexp"`
+	EpisodeRegExp string `yaml:"episode_regexp"`
 }
 
 type Config struct {
@@ -81,24 +71,23 @@ func btClient(connection string) (*transmissionrpc.Client, error) {
 }
 
 func main() {
+	defer Handle(func(err error) {
+		log.Fatal(err)
+	})
 	if len(os.Args) < 2 {
 		fmt.Print("anime-download <config path>\n")
 		return
 	}
-	db, err := bolt.Open("./db", 0664, nil)
-	check(err)
-
-	b, err := ioutil.ReadFile(os.Args[1])
-	check(err)
+	db := Try(bbolt.Open("./db", 0664, nil))
+	b := Try(ioutil.ReadFile(os.Args[1]))
 
 	cfg := &Config{}
-	check(yaml.Unmarshal(b, cfg))
+	Try0(yaml.Unmarshal(b, cfg))
 
-	client, err := btClient(cfg.Connection)
-	check(err)
+	client := Try(btClient(cfg.Connection))
 
 	for _, series := range cfg.Series {
-		err = download(db, client, series)
+		err := download(db, client, series)
 		if err != nil {
 			log.Print(err)
 		}
@@ -120,140 +109,6 @@ func initBucket(db *bolt.DB, name []byte) error {
 		return nil
 	})
 }
-
-func download(db *bolt.DB, transmissionbt *transmissionrpc.Client, s *Series) error {
-
-	fp := gofeed.NewParser()
-	feed, err := fp.ParseURL(s.RSS)
-	if err != nil {
-		return err
-	}
-
-	err = initBucket(db, bucket)
-	if err != nil {
-		return err
-	}
-
-	re := regexp.MustCompile(s.RegExp)
-
-	for _, item := range feed.Items {
-		if s.RegExp != "" && re.FindString(item.Title) == "" {
-			continue
-		}
-
-		id := []byte(item.Link)
-
-		err = db.Update(func(tx *bolt.Tx) error {
-			b := tx.Bucket(bucket)
-			g := b.Get(id)
-			if g == nil {
-				log.Printf("Downloading %s", item.Title)
-
-				file := ""
-				if len(item.Enclosures) > 0 {
-					file = item.Enclosures[0].URL
-				} else if item.Link != "" {
-					file = item.Link
-				}
-
-				path := "/tmp/" + file
-				err := os.MkdirAll(filepath.Dir(path), 0755)
-				if err != nil {
-					return err
-				}
-				err = downloadFile(path, file)
-				if err != nil {
-					return err
-				}
-
-				torrent, err := transmissionbt.TorrentAddFile(path)
-				// torrent, err := transmissionbt.TorrentAdd(&transmissionrpc.TorrentAddPayload{
-				// 	Filename: &path,
-				// })
-				if err != nil {
-					return err
-				}
-
-				d := &Download{
-					ID:               id,
-					Series:           s.Title,
-					TorrentURL:       item.Link,
-					Compleated:       false,
-					TransmissionHash: *torrent.HashString,
-				}
-				by, err := json.Marshal(d)
-				if err != nil {
-					return err
-				}
-				err = b.Put(id, by)
-				if err != nil {
-					return err
-				}
-			}
-			return nil
-		})
-		if err != nil {
-			log.Print(err)
-		}
-	}
-
-	return nil
-}
-
-func move(db *bolt.DB, client *transmissionrpc.Client, cfg *Config) error {
-	return db.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket(bucket)
-		return b.ForEach(func(k, v []byte) error {
-			d := &Download{}
-			err := json.Unmarshal(v, d)
-			if err != nil {
-				return err
-			}
-
-			if d.Compleated == true {
-				return nil
-			}
-
-			torrents, err := client.TorrentGetAllForHashes([]string{d.TransmissionHash})
-			if err != nil {
-				return err
-			}
-			if len(torrents) == 0 {
-				return nil
-			}
-			torrent := torrents[0]
-
-			if torrent.DoneDate != nil && !torrent.DoneDate.IsZero() {
-
-				log.Printf("Finished downloading %s", *torrent.Name)
-
-				for _, file := range torrent.Files {
-					dst := path.Join(cfg.CompletePath, d.Series, file.Name)
-					err := os.MkdirAll(path.Dir(dst), 0755)
-					if err != nil {
-						return err
-					}
-					err = copyFile(path.Join(cfg.DownloadPath, file.Name), dst)
-					if err != nil {
-						return err
-					}
-				}
-
-				d.Compleated = true
-				by, err := json.Marshal(d)
-				if err != nil {
-					return err
-				}
-				err = b.Put(k, by)
-				if err != nil {
-					return err
-				}
-			}
-			return nil
-		})
-	})
-}
-
 func copyFile(src, dst string) error {
 	sourceFileStat, err := os.Stat(src)
 	if err != nil {
