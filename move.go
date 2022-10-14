@@ -9,7 +9,6 @@ import (
 	"regexp"
 
 	"github.com/abibby/transmissionrpc"
-	"github.com/davecgh/go-spew/spew"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -57,7 +56,6 @@ func move(db *bolt.DB, client *transmissionrpc.Client, cfg *Config) error {
 								fileName += fmt.Sprintf("E%s", episode)
 							}
 							fileName += path.Ext(file.Name)
-							spew.Dump(fileName)
 						}
 					}
 
