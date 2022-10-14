@@ -60,8 +60,7 @@ func move(db *bolt.DB, client *transmissionrpc.Client, cfg *Config) error {
 							spew.Dump(fileName)
 						}
 					}
-					spew.Dump(fileName)
-					os.Exit(1)
+
 					dst := path.Join(cfg.CompletePath, d.Series, fileName)
 					err := os.MkdirAll(path.Dir(dst), 0755)
 					if err != nil {
