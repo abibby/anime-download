@@ -39,7 +39,7 @@ func download(db *bolt.DB, transmissionbt *transmissionrpc.Client, s *Series) er
 		if s.RegExp != "" && re.FindString(item.Title) == "" {
 			continue
 		}
-
+		log.Printf("found episode %s", item.Title)
 		id := []byte(item.Link)
 
 		err = db.Update(func(tx *bolt.Tx) error {
