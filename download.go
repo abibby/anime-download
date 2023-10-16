@@ -36,6 +36,7 @@ func download(db *bolt.DB, transmissionbt *transmissionrpc.Client, s *Series) er
 	re := regexp.MustCompile(s.RegExp)
 
 	for _, item := range feed.Items {
+		// log.Print(item.Title)
 		if s.RegExp != "" && re.FindString(item.Title) == "" {
 			continue
 		}
