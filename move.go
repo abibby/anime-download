@@ -64,6 +64,7 @@ func move(db *bolt.DB, client *transmissionrpc.Client, cfg *Config) error {
 					if err != nil {
 						return err
 					}
+					log.Printf("copy %s to %s", fileName, dst)
 					err = copyFile(path.Join(cfg.DownloadPath, file.Name), dst)
 					if err != nil {
 						return err
