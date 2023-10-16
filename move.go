@@ -22,7 +22,7 @@ func move(db *bolt.DB, client *transmissionrpc.Client, cfg *Config) error {
 				return err
 			}
 
-			if d.Compleated == true {
+			if d.Compleated {
 				return nil
 			}
 

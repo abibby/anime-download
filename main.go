@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"net/url"
@@ -78,15 +77,18 @@ func main() {
 		fmt.Print("anime-download <config path>\n")
 		return
 	}
+	log.Print("open db")
 	db := Try(bbolt.Open("./db", 0664, nil))
-	b := Try(ioutil.ReadFile(os.Args[1]))
+	b := Try(os.ReadFile(os.Args[1]))
 
 	cfg := &Config{}
 	Try0(yaml.Unmarshal(b, cfg))
 
+	log.Print("connect to transmission")
 	client := Try(btClient(cfg.Connection))
 
 	for _, series := range cfg.Series {
+		log.Printf("checking for new episodes of %s", series.Title)
 		err := download(db, client, series)
 		if err != nil {
 			log.Print(err)
