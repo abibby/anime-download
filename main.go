@@ -74,7 +74,7 @@ func main() {
 		log.Fatal(err)
 	})
 	if len(os.Args) < 2 {
-		fmt.Print("anime-download <config path>\n")
+		fmt.Print("anime-download <config path>\nversion 1.0")
 		return
 	}
 	log.Print("open db")
