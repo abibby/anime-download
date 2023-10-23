@@ -24,6 +24,7 @@ type Series struct {
 }
 
 type Config struct {
+	DBPath       string    `yaml:"db_path"`
 	Connection   string    `yaml:"connection"`
 	Ratio        int       `yaml:"ratio"`
 	Series       []*Series `yaml:"series"`
@@ -77,12 +78,13 @@ func main() {
 		fmt.Print("anime-download <config path>\nversion 1.0")
 		return
 	}
-	log.Print("open db")
-	db := Try(bbolt.Open("./db", 0664, nil))
 	b := Try(os.ReadFile(os.Args[1]))
 
 	cfg := &Config{}
 	Try0(yaml.Unmarshal(b, cfg))
+
+	log.Print("open db")
+	db := Try(bbolt.Open(cfg.DBPath, 0664, nil))
 
 	log.Print("connect to transmission")
 	client := Try(btClient(cfg.Connection))
